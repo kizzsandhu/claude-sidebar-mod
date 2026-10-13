@@ -27,6 +27,16 @@ const NOW = 1_800_000_000_000
 const HOUR = 3_600_000
 const STEP = { at: NOW - 10 * 60_000, contextTokens: 50_000, model: 'claude-opus-5-5' }
 
+test("dates the session's start from its duration and the file's save time, resumes included", async () => {
+  // A resumed session's real figures: 1h56m51s, saved at 11:28:21.
+  const savedAt = Date.parse('2026-10-13T11:28:21Z')
+  const json = JSON.stringify({ cost: { total_duration_ms: 7_011_035 } })
+  expect(parseFeed(json, savedAt)?.startedAt).toBe(savedAt - 7_011_035)
+  // No save time or no duration: no start, so the engine's stands in.
+  expect(parseFeed(json)?.startedAt).toBeUndefined()
+  expect(parseFeed(STATUS_LINE, savedAt)?.startedAt).toBeUndefined()
+})
+
 test('the status line prompt_cache wins whenever it has figures', async () => {
   const feed = { cacheTtl: '1h' as const, isCacheWarm: true, cacheExpiresAt: NOW + 5 * 60_000, recacheTokens: 300_916, addedDirs: [] }
   expect(resolveCache(feed, STEP, '1h')).toEqual({ tokens: 300_916, expiresAt: NOW + 5 * 60_000, ttl: '1h' })

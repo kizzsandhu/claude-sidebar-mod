@@ -70,7 +70,7 @@ With it, the sidebar shows:
 - a red **FAST MODE ON** line (and a toast) when fast mode is on, since it bills at a higher rate;
 - the cache chip's real TTL, expiry and rebuild size;
 - effort from the start of the session;
-- API time including time before a resume;
+- elapsed time and API time including time before a resume;
 - added dirs.
 
 Without it, fast mode comes from the `fastMode` setting, and the cache chip assumes a 1-hour TTL from the last response. Either way, after a `--resume` the cache chip stays hidden until the first reply.

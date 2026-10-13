@@ -14,6 +14,7 @@ import {
 } from './ci'
 import { FEED_DIR, parseFeed, resolveCache } from './feed'
 import { costColor, discounted, parsePricing, recacheCost, toDiscount } from './pricing'
+import { elapsedText, isKnownStart } from './session'
 import {
   applyTaskCreate,
   applyTaskUpdate,
@@ -82,6 +83,20 @@ const toUsage = (u: SessionUsage | SessionMeasureInput, startedAt: number): Usag
   startedAt,
 })
 
+// When the session started, epoch ms: the one stored, else the engine's, else
+// the mod's first sight of it; 0 while none is known (drawn as '-', and the
+// next usage reading tries again).
+const sessionStartedAt = async ($: EngineInterface, known: number | undefined) => {
+  if (isKnownStart(known)) return known
+  try {
+    const reported = (await $.session.usage()).startedAt
+    if (isKnownStart(reported)) return reported
+    return await $.clock.now()
+  } catch {
+    return 0
+  }
+}
+
 const git = async ($: EngineInterface, cwd: string, args: string[]) => {
   try {
     const r = await $.process.run(['git', '-C', cwd, ...args], { timeoutMs: 5000 })
@@ -147,13 +162,20 @@ const refreshFastMode = async ($: EngineInterface) => {
 const refreshFeed = async ($: EngineInterface) => {
   const ws = await read($, workspace)
   if (ws === null || ws.home === undefined) return
+  const path = `${ws.home}/${FEED_DIR}/${ws.sessionId}.json`
   let text: string
+  let savedAt: number | undefined
   try {
-    text = await $.fs.read(`${ws.home}/${FEED_DIR}/${ws.sessionId}.json`)
+    text = await $.fs.read(path)
   } catch {
     return // No feed (statusline-feed.sh isn't the status line): fallbacks apply.
   }
-  const parsed = parseFeed(text)
+  try {
+    savedAt = (await $.fs.stat(path)).mtimeMs
+  } catch {
+    savedAt = undefined
+  }
+  const parsed = parseFeed(text, savedAt)
   if (parsed === null) return
   await update($, feed, () => parsed)
   if (parsed.isFastMode !== undefined) await setFastMode($, parsed.isFastMode)
@@ -305,7 +327,8 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: 'sidebar', description: 'Show or hide the session sidebar pane' })
 
     const u = await $.session.usage()
-    await update($, usage, () => toUsage(u, u.startedAt))
+    const startedAt = await sessionStartedAt($, u.startedAt)
+    await update($, usage, () => toUsage(u, startedAt))
     const tick = async () => {
       const t = await $.clock.now()
       await update($, now, () => t)
@@ -384,7 +407,8 @@ export const register: Register = (on, options) => {
   })
 
   on('session.measure', async ($, e, next) => {
-    await update($, usage, prev => toUsage(e, prev?.startedAt ?? 0))
+    const startedAt = await sessionStartedAt($, (await read($, usage))?.startedAt)
+    await update($, usage, () => toUsage(e, startedAt))
 
     return next(e)
   })
@@ -612,7 +636,7 @@ export const register: Register = (on, options) => {
         </Text>
         <Text>
           <Text dimColor>time  </Text>
-          {u === null ? '-' : fmtDuration(at - u.startedAt)}
+          {elapsedText(isKnownStart(fed?.startedAt) ? fed.startedAt : u?.startedAt, at, fmtDuration)}
         </Text>
         <Text>
           <Text dimColor>api   </Text>
