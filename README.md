@@ -1,6 +1,11 @@
 # claude-sidebar-mod
 
-A Claude Code plugin marketplace with one mod, **sidebar**: a pane docked beside the transcript that shows the session's model, usage, workspace, CI and tasks. It replaces a multi-line status line, so the prompt box stays in one place.
+A Claude Code plugin marketplace with two plugins, installed separately:
+
+- **sidebar**: a pane docked beside the transcript that shows the session's model, usage, workspace, CI and tasks. It replaces a multi-line status line, so the prompt box stays in one place.
+- **rose-pine**: [Rosé Pine](https://rosepinetheme.com/) colour themes for Claude Code itself. See [Rosé Pine themes](#rosé-pine-themes).
+
+The rest of this page is about the sidebar until that section.
 
 It's built on Claude Code's function-hooks plugin API, which is early access and may change between releases.
 
@@ -120,9 +125,26 @@ It needs the `SwiftTodoManager` binary at the path in `TODO_BIN` (`sidebar/hooks
 re-reads the list after any `mcp__swift-todo-manager__*` call, at the end of each turn, and every 30
 seconds. Share `main`, not this branch; merge `main` into it to pick up changes.
 
+## Rosé Pine themes
+
+Three Claude Code themes built from the official [Rosé Pine palette](https://github.com/rose-pine/palette): **Rosé Pine**, **Rosé Pine Moon** (both dark) and **Rosé Pine Dawn** (light). Install:
+
+```
+/plugin install rose-pine --marketplace pthexton/claude-sidebar-mod
+```
+
+then pick one in `/theme`, where it's marked as from `rose-pine`. To tweak one, edit it in `/theme` (Ctrl+E): Claude Code saves your edit as a copy in `~/.claude/themes/`, since plugin themes are read-only.
+
+The colours follow Rosé Pine's [role guide](https://rosepinetheme.com/palette/ingredients): rose is the accent, love marks errors and removed lines, gold warnings and fast mode, foam success and added lines, iris permissions and merges, and the highlight shades the prompt border, selection and your messages.
+
+They colour the terminal UI only. The desktop app's Code tab keeps its own colours, and so does your terminal: for the sidebar's colours (which use the terminal's ANSI palette) to match, give the terminal the Rosé Pine theme as well (Ghostty: `theme = Rose Pine`).
+
+`rose-pine/themes/*.json` is generated: change `rose-pine/build.rb` and run `ruby rose-pine/build.rb`.
+
 ## Developing
 
 ```
+claude plugin validate rose-pine
 claude plugin validate sidebar
 claude plugin test sidebar
 ```
