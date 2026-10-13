@@ -108,6 +108,32 @@ const sessionStartedAt = async ($: EngineInterface, known: number | undefined) =
   }
 }
 
+// The sidebar's state belongs to a session. /clear (and /new, its alias)
+// carries the process on under a new one, which starts with that state empty
+// and gets no session.start: the model shows "?" and Workspace, CI and the
+// session id vanish until a turn ends. The tick sees the missing workspace and
+// fills it in again, with the rest session.start would have read.
+let isRefilling = false
+const refillIfEmpty = async ($: EngineInterface) => {
+  if (isRefilling || (await read($, workspace)) !== null) return
+  isRefilling = true
+  try {
+    await refreshTodos($, await refreshWorkspace($))
+    if ((await read($, usage)) === null) {
+      const u = await $.session.usage()
+      const startedAt = await sessionStartedAt($, u.startedAt)
+      await update($, usage, () => toUsage(u, startedAt))
+    }
+    await refreshFeed($)
+    await refreshFastMode($)
+    $.clock.after(0, () => void refreshCi($, false))
+  } catch {
+    // Try again on the next tick.
+  } finally {
+    isRefilling = false
+  }
+}
+
 const git = async ($: EngineInterface, cwd: string, args: string[]) => {
   try {
     const r = await $.process.run(['git', '-C', cwd, ...args], { timeoutMs: 5000 })
@@ -374,7 +400,7 @@ export const register: Register = (on, options) => {
     await refreshFastMode($)
 
     // Drives the elapsed time and the cache countdown between events.
-    $.clock.every(1000, () => void tick())
+    $.clock.every(1000, () => void tick().then(() => refillIfEmpty($)))
     $.clock.every(FEED_POLL_MS, () => void refreshFeed($))
     $.clock.every(TODO_POLL_MS, () => void read($, workspace).then(ws => refreshTodos($, ws)))
 
