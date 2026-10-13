@@ -37,6 +37,8 @@ export type Feed = {
   effort?: string
   // The session's API time, resumed sessions included.
   apiDurationMs?: number
+  // When the session started, epoch ms, resumed sessions included.
+  startedAt?: number
   addedDirs: string[]
 }
 

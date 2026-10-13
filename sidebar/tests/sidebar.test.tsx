@@ -41,7 +41,6 @@ test('draws usage figures from session.measure on every surface that docks', { o
     await ui.unmount()
   }
 })
-
 test('the default 9% discount comes off the session cost, and the Cost section says so', async ($, on) => {
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   await $.session.measure(measure)

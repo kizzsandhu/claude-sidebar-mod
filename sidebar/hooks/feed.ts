@@ -6,7 +6,8 @@ export const FEED_DIR = '.claude/state/statusline'
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 
-export const parseFeed = (json: string): Feed | null => {
+// savedAt, the file's modified time, dates the JSON's durations.
+export const parseFeed = (json: string, savedAt?: number): Feed | null => {
   let raw: unknown
   try {
     raw = JSON.parse(json)
@@ -19,9 +20,10 @@ export const parseFeed = (json: string): Feed | null => {
     effort?: { level?: unknown }
     prompt_cache?: { ttl?: unknown; warm?: unknown; expires_at?: unknown; recache_tokens_if_cold?: unknown }
     workspace?: { added_dirs?: unknown }
-    cost?: { total_api_duration_ms?: unknown }
+    cost?: { total_api_duration_ms?: unknown; total_duration_ms?: unknown }
   }
   const cache = j.prompt_cache ?? {}
+  const durationMs = num(j.cost?.total_duration_ms)
   const expiresAt = num(cache.expires_at)
   const dirs = j.workspace?.added_dirs
   return {
@@ -33,6 +35,10 @@ export const parseFeed = (json: string): Feed | null => {
     recacheTokens: num(cache.recache_tokens_if_cold),
     effort: typeof j.effort?.level === 'string' ? j.effort.level : undefined,
     apiDurationMs: num(j.cost?.total_api_duration_ms),
+    // Claude Code's session duration counts time before a resume, so the
+    // start it implies is the real one; dated from the save, it stays right
+    // between status line updates.
+    startedAt: savedAt === undefined || durationMs === undefined ? undefined : savedAt - durationMs,
     addedDirs: Array.isArray(dirs) ? dirs.filter((d): d is string => typeof d === 'string') : [],
   }
 }
