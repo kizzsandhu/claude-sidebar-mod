@@ -13,6 +13,7 @@ import {
   summarize,
 } from './ci'
 import { FEED_DIR, parseFeed, resolveCache } from './feed'
+import { FX_URL, cacheAmount, fmtGbp, fmtRateDate, isRateStale, parseRate, toRate } from './fx'
 import { baseName, homeDir } from './paths'
 import { costColor, discounted, parsePricing, recacheCost, toDiscount } from './pricing'
 import { elapsedText, isKnownStart } from './session'
@@ -50,6 +51,8 @@ const feed = atom({ plugin: 'sidebar', key: 'feed' } as const, null)
 // A change made in /config this session; null until then, when the module's
 // own options (read as it loaded) are the setting.
 const discountChange = atom({ plugin: 'sidebar', key: 'discountChange' } as const, null)
+const gbpRate = atom({ plugin: 'sidebar', key: 'gbpRate' } as const, null)
+const gbpChange = atom({ plugin: 'sidebar', key: 'gbpChange' } as const, null)
 
 // statusline-feed.sh rewrites its file whenever the status line updates.
 const FEED_POLL_MS = 2000
@@ -74,6 +77,26 @@ const refreshPricing = async ($: EngineInterface, home: string | undefined) => {
     await update($, pricing, () => rows)
   } catch {
     // Keep whatever was loaded before.
+  }
+}
+
+// The USD to GBP rate, kept in $.store so every session shares one fetch a
+// day. A failed fetch keeps the saved rate; with none saved, no £ is shown.
+const GBP_STORE_KEY = 'gbpRate'
+
+const refreshGbpRate = async ($: EngineInterface) => {
+  const saved = toRate(await $.store.get(GBP_STORE_KEY))
+  if (saved !== undefined) await update($, gbpRate, () => saved)
+  const at = await $.clock.now()
+  if (!isRateStale(saved, at)) return
+  try {
+    const res = await $.http.fetch(FX_URL)
+    const fresh = res.ok ? parseRate(res.text, at) : undefined
+    if (fresh === undefined) return
+    await $.store.set(GBP_STORE_KEY, fresh)
+    await update($, gbpRate, () => fresh)
+  } catch {
+    // Offline or refused: keep whatever was saved.
   }
 }
 
@@ -341,19 +364,29 @@ const windowLabel = (kind: string) => ({ five_hour: '5h', seven_day: '7d' })[kin
 
 export const register: Register = (on, options) => {
   const discountOption = toDiscount(options.discountPercent)
+  const gbpOption = options.showGbp === true
 
-  // The discount row in /config: show a change at once, whether or not the
-  // engine reloads the module with the new options.
+  // The discount and Show £ rows in /config: show a change at once, whether
+  // or not the engine reloads the module with the new options.
   on('config.set', async ($, e, next) => {
     const set = await next(e)
     if (set.deny === undefined && e.provider.plugin === 'sidebar' && e.key.endsWith('.discountPercent')) {
       await update($, discountChange, () => toDiscount(set.value))
+    }
+    if (set.deny === undefined && e.provider.plugin === 'sidebar' && e.key.endsWith('.showGbp')) {
+      const isOn = set.value === true
+      await update($, gbpChange, () => isOn)
+      if (isOn) await refreshGbpRate($)
     }
 
     return set
   })
 
   on('session.start', async ($, e, next) => {
+    // The £ rate first, off the start-up path, so nothing below holds it up
+    // or stops it. Nothing is fetched while Show £ is off.
+    if (gbpOption) $.clock.after(0, () => void refreshGbpRate($))
+
     await $.command.register({ name: 'sidebar', description: 'Show or hide the session sidebar pane' })
 
     const u = await $.session.usage()
@@ -517,7 +550,7 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
-    const [u, step, api, ws, at, prices, claude, ciStatus, isFetching, isFast, fed, changed] = await Promise.all([
+    const [u, step, api, ws, at, prices, claude, ciStatus, isFetching, isFast, fed, changed, fx, gbpChanged] = await Promise.all([
       read($, usage),
       read($, lastStep),
       read($, apiMs),
@@ -530,8 +563,15 @@ export const register: Register = (on, options) => {
       read($, isFastMode),
       read($, feed),
       read($, discountChange),
+      read($, gbpRate),
+      read($, gbpChange),
     ])
     const discount = changed ?? discountOption
+    const isGbp = gbpChanged ?? gbpOption
+    // The rate to show £ at; undefined when Show £ is off or none is fetched.
+    const rate = isGbp ? fx?.rate : undefined
+    const Gbp = ({ usd }: { usd: number }) =>
+      rate === undefined ? null : <Text color="yellow"> {fmtGbp(usd, rate)}</Text>
     const listCost = u?.costUsd ?? 0
     const home = ws?.home
     const effort = fed?.effort ?? step?.effort
@@ -559,8 +599,14 @@ export const register: Register = (on, options) => {
       const toks = fmtTokens(tokens)
       const listPrice = recacheCost(prices, model, tokens, ttl, isFast)
       const cost = listPrice === undefined ? undefined : discounted(listPrice, discount)
-      const amount =
-        cost === undefined ? toks : `$${cost.toFixed(2)}${discount > 0 ? '*' : ''} (${toks})`
+      const label = left > 0 ? `cache warm ${Math.floor(left / 60000)}m ↻` : 'cache cold ↻'
+      const amount = cacheAmount({
+        cost,
+        isDiscounted: discount > 0,
+        toks,
+        rate,
+        room: e.props.bodyColumns - label.length,
+      })
       return left > 0 ? (
         <Text>
           <Text dimColor>cache </Text>
@@ -663,6 +709,7 @@ export const register: Register = (on, options) => {
           <Text dimColor>cost  </Text>
           <Text color="yellow">${discounted(listCost, discount).toFixed(2)}</Text>
           {discount > 0 && <Text dimColor>*</Text>}
+          <Gbp usd={discounted(listCost, discount)} />
         </Text>
         <Text>
           <Text dimColor>time  </Text>
@@ -737,15 +784,25 @@ export const register: Register = (on, options) => {
           </Box>
         )}
 
-        {discount > 0 && (
+        {(discount > 0 || isGbp) && (
           <Box flexDirection="column">
             <Text> </Text>
             <Heading color="yellow">Cost</Heading>
-            <Text wrap="truncate-end">* {fmtPercent(discount)} discount off list prices</Text>
-            <Text>
-              <Text dimColor>list  </Text>${listCost.toFixed(2)}
-            </Text>
-            <Text dimColor wrap="wrap">Change it in /config: Billing discount (%)</Text>
+            {discount > 0 && (
+              <Box flexDirection="column">
+                <Text wrap="truncate-end">* {fmtPercent(discount)} discount off list prices</Text>
+                <Text>
+                  <Text dimColor>list  </Text>${listCost.toFixed(2)}
+                  <Gbp usd={listCost} />
+                </Text>
+                <Text dimColor wrap="wrap">Change it in /config: Billing discount (%)</Text>
+              </Box>
+            )}
+            {isGbp && (
+              <Text dimColor wrap="wrap">
+                {fx === null ? '£ rate not fetched yet' : `£ at ${fx.rate.toFixed(4)} per $ (ECB, ${fmtRateDate(fx.date)})`}
+              </Text>
+            )}
           </Box>
         )}
       </Box>

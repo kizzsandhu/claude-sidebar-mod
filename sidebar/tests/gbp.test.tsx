@@ -1,0 +1,182 @@
+import type { On, SessionMeasureInput } from 'claude-code'
+import { expect, mock, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
+
+const PANE = {
+  component: 'Pane',
+  requestId: 'sidebar',
+  props: {
+    title: 'Session',
+    isFocused: false,
+    bodyColumns: 40,
+    placement: 'dock',
+    scroll: { offset: 0, bodyRows: 40 },
+    view: {},
+  },
+} as const
+
+const measure: SessionMeasureInput = {
+  context: { tokens: 84_000, window: 200_000, percent: 42 },
+  rateLimits: [],
+  cost: { usd: 1.234 },
+  changed: ['context', 'cost'],
+}
+
+const DAY = 24 * 60 * 60 * 1000
+const URL = 'https://api.frankfurter.dev/v1/latest?from=USD&to=GBP'
+const RATE = '{"amount":1.0,"base":"USD","date":"2026-10-13","rates":{"GBP":0.75492}}'
+const START = { cwd: '/repo', surface: 'terminal', isInteractive: true, startedAt: 0 } as const
+// A rate saved by an earlier session, a different figure from RATE's.
+const SAVED = { rate: 0.8, date: '2026-10-01', fetchedAt: 0 }
+
+
+// Nothing sits beneath the plugin in a test: answer the events these need.
+// The sidebar's main start-up hook is skipped (no commands, no git here);
+// the rate has a start-up hook of its own.
+const answerEngine = (on: On, opts: { now?: number; store?: Record<string, unknown> } = {}) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  mock.store(on, opts.store)
+  return mock.clock(on, { now: opts.now ?? 0 })
+}
+
+// The Show £ row changed in /config. A session's engine stamps who owns the
+// row and where the change came from; a test's $.config.set takes only key
+// and value, so the stamp is given here.
+const setShowGbp = ($: Engine, value: boolean) =>
+  $.config.set({
+    key: 'sidebar.showGbp',
+    value,
+    previous: !value,
+    provider: { plugin: 'sidebar', tier: 'user' },
+    origin: { kind: 'composer' },
+  } as Parameters<typeof $.config.set>[0])
+
+// Answers the rate fetch the way Frankfurter does (or fails it), counting calls.
+const stubRate = (on: On, answer: 'ok' | 'down') => {
+  const calls: string[] = []
+  on('http.fetch', (_$, e) => {
+    calls.push(e.url)
+    return answer === 'ok'
+      ? { value: { status: 200, ok: true, headers: {}, text: RATE } }
+      : { value: { status: 503, ok: false, headers: {}, text: '' } }
+  })
+  return calls
+}
+
+test('off by default: no £ anywhere and no rate fetched', async ($, on) => {
+  const calls = stubRate(on, 'ok')
+  const clock = answerEngine(on)
+  await $.session.start(START)
+  await clock.settle()
+  await $.session.measure(measure)
+
+  const ui = await $.ui.mount({ plugin: 'sidebar', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /£/ })).toBeUndefined()
+  expect(calls).toEqual([])
+  await ui.unmount()
+})
+
+test('switched on: £ follows the discounted $ cost, and the Cost section names the rate', { options: { showGbp: true } }, async ($, on) => {
+  const calls = stubRate(on, 'ok')
+  const clock = answerEngine(on)
+  await $.session.start(START)
+  await clock.settle()
+  await $.session.measure(measure)
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ plugin: 'sidebar', surface, ...PANE })
+    // $1.234 x 0.91 = $1.12; x 0.75492 = £0.85
+    expect(await ui.find({ type: 'Text', text: /\$1\.12\*\s+£0\.85/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /list\s+\$1\.23\s+£0\.93/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /£ at 0\.7549 per \$ \(ECB, 13 Oct\)/ })).toBeDefined()
+    await ui.unmount()
+  }
+  expect(calls).toEqual([URL])
+})
+
+test('with no discount the Cost section still shows, for the rate', { options: { showGbp: true, discountPercent: 0 } }, async ($, on) => {
+  stubRate(on, 'ok')
+  const clock = answerEngine(on)
+  await $.session.start(START)
+  await clock.settle()
+  await $.session.measure(measure)
+
+  const ui = await $.ui.mount({ plugin: 'sidebar', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /\$1\.23\s+£0\.93/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /── Cost ──/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /discount off list prices/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /£ at 0\.7549 per \$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a rate saved under a day ago is used as it is, with nothing fetched', { options: { showGbp: true } }, async ($, on) => {
+  const calls = stubRate(on, 'ok')
+  const clock = answerEngine(on, { now: DAY - 1, store: { gbpRate: SAVED } })
+  await $.session.start(START)
+  await clock.settle()
+  await $.session.measure(measure)
+
+  const ui = await $.ui.mount({ plugin: 'sidebar', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /£ at 0\.8000 per \$ \(ECB, 1 Oct\)/ })).toBeDefined()
+  expect(calls).toEqual([])
+  await ui.unmount()
+})
+
+test('a rate saved a day ago is fetched again', { options: { showGbp: true } }, async ($, on) => {
+  const calls = stubRate(on, 'ok')
+  const clock = answerEngine(on, { now: DAY, store: { gbpRate: SAVED } })
+  await $.session.start(START)
+  await clock.settle()
+  await $.session.measure(measure)
+
+  const ui = await $.ui.mount({ plugin: 'sidebar', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /£ at 0\.7549 per \$/ })).toBeDefined()
+  expect(calls).toEqual([URL])
+  await ui.unmount()
+})
+
+test('with the rate service down, the saved rate is kept', { options: { showGbp: true } }, async ($, on) => {
+  stubRate(on, 'down')
+  const clock = answerEngine(on, { now: 5 * DAY, store: { gbpRate: SAVED } })
+  await $.session.start(START)
+  await clock.settle()
+  await $.session.measure(measure)
+
+  const ui = await $.ui.mount({ plugin: 'sidebar', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /£ at 0\.8000 per \$ \(ECB, 1 Oct\)/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('with the rate service down and nothing saved, no £ figure is made up', { options: { showGbp: true } }, async ($, on) => {
+  stubRate(on, 'down')
+  const clock = answerEngine(on)
+  await $.session.start(START)
+  await clock.settle()
+  await $.session.measure(measure)
+
+  const ui = await $.ui.mount({ plugin: 'sidebar', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /£\d/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /£ rate not fetched yet/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('switching it on in /config fetches the rate and shows £ at once', async ($, on) => {
+  const calls = stubRate(on, 'ok')
+  const clock = answerEngine(on)
+  await $.session.start(START)
+  await clock.settle()
+  await $.session.measure(measure)
+
+  const ui = await $.ui.mount({ plugin: 'sidebar', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /£/ })).toBeUndefined()
+  const set = await setShowGbp($, true)
+  expect(set.deny).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /\$1\.12\*\s+£0\.85/ })).toBeDefined()
+  expect(calls).toEqual([URL])
+
+  await setShowGbp($, false)
+  expect(await ui.find({ type: 'Text', text: /£/ })).toBeUndefined()
+  await ui.unmount()
+})

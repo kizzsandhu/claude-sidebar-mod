@@ -9,6 +9,12 @@
       "title": "Billing discount (%)",
       "description": "Your discount off Anthropic's published prices. The sidebar takes it off the session cost and the cache rebuild cost. 0 shows list prices.",
       "default": 9
+    },
+    "showGbp": {
+      "type": "boolean",
+      "title": "Show £ alongside $",
+      "description": "Also show costs in pounds, at the European Central Bank's daily rate, fetched at most once a day from frankfurter.dev. Anthropic bills in dollars, so the £ figure is a guide.",
+      "default": false
     }
   }
 }

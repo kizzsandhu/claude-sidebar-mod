@@ -48,13 +48,19 @@ The sidebar only docks beside the transcript in the **fullscreen** layout. Add t
 | Workspace | repo (and `(wt)` in a worktree), cwd, project root, branch, added dirs | `git` on `PATH`; added dirs need the status line feed |
 | CI | the branch's PR, check counts, merge conflicts with the base (in red, with a toast when they first appear), failing and pending checks, refresh and open-PR buttons. Re-checked every 5 minutes once CI has finished, since the base can move on | [`gh`](https://cli.github.com/), signed in (`gh auth login`). Hidden when there's no PR or `gh` can't answer |
 | Tasks | Claude's own task list (`TodoWrite`, `TaskCreate`, `TaskUpdate`) for the main conversation | nothing |
-| Cost | the billing discount in use, the session cost at list price, and where to change the discount. Hidden when the discount is 0 | nothing |
+| Cost | the billing discount in use, the session cost at list price, and where to change the discount; with [£ shown](#pounds-), the exchange rate in use. Hidden when the discount is 0 and £ is off | nothing |
 
 ## Billing discount
 
 Costs are shown after a discount off Anthropic's published prices, 9% by default. That applies to the session cost (Claude Code's own figure, scaled) and to the cache rebuild cost. Both are marked `*`, and the Cost section at the bottom shows the discount and the session cost at list price.
 
 To change it, open `/config` and set **Billing discount (%)** under the sidebar plugin. Set it to 0 to see list prices; the Cost section then disappears.
+
+## Pounds (£)
+
+To see costs in pounds as well as dollars, open `/config` and switch on **Show £ alongside $** under the sidebar plugin. It's off by default. Dollars stay first, since Anthropic bills in dollars: the session cost reads `$1.12* £0.85`, and the cache chip adds £ when the pane is wide enough for it.
+
+The rate is the European Central Bank's daily reference rate, fetched from [Frankfurter](https://frankfurter.dev) (free, no key) at most once a day and shared by every session. The Cost section shows the rate in use and its date: `£ at 0.7549 per $ (ECB, 13 Oct)`. If the fetch fails, the last rate fetched is kept; with none, no £ figure is shown. Nothing is fetched while the setting is off.
 
 Commands: `/sidebar` shows or hides the pane (its close mark ignores clicks, so a stray one can't close it), `/ci-refresh` fetches CI now, `/open-pr` opens the PR in your browser (`open` on macOS, `xdg-open` on Linux, `rundll32 url.dll,FileProtocolHandler` on Windows).
 
