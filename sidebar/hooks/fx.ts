@@ -65,6 +65,6 @@ export const cacheAmount = ({
 }) => {
   if (cost === undefined) return toks
   const usd = `$${cost.toFixed(2)}${isDiscounted ? '*' : ''}`
-  const withGbp = rate === undefined ? undefined : `${usd} ${fmtGbp(cost, rate)} (${toks})`
+  const withGbp = rate === undefined ? undefined : `${usd} ${fmtGbp(cost, rate)}${isDiscounted ? '*' : ''} (${toks})`
   return withGbp !== undefined && withGbp.length <= room ? withGbp : `${usd} (${toks})`
 }

@@ -113,7 +113,7 @@ test('switched on: £ follows the discounted $ cost, and the Cost section names 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'sidebar', surface, ...PANE })
     // $1.234 x 0.91 = $1.12; x 0.75492 = £0.85
-    expect(await ui.find({ type: 'Text', text: /\$1\.12\*\s+£0\.85/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /\$1\.12\*\s+£0\.85\*/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /list\s+\$1\.23\s+£0\.93/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /£ at 0\.7549 per \$ \(ECB, 13 Oct\)/ })).toBeDefined()
     await ui.unmount()
@@ -130,6 +130,8 @@ test('with no discount the Cost section still shows, for the rate', { options: {
 
   const ui = await $.ui.mount({ plugin: 'sidebar', surface: 'terminal', ...PANE })
   expect(await ui.find({ type: 'Text', text: /\$1\.23\s+£0\.93/ })).toBeDefined()
+  // nothing taken off, so neither figure is starred
+  expect(await ui.find({ type: 'Text', text: /\*/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /── Cost ──/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /discount off list prices/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /£ at 0\.7549 per \$/ })).toBeDefined()
@@ -198,7 +200,7 @@ test('switching it on in /config fetches the rate and shows £ at once', async (
   expect(await ui.find({ type: 'Text', text: /£/ })).toBeUndefined()
   const set = await setShowGbp($, true)
   expect(set.deny).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /\$1\.12\*\s+£0\.85/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\$1\.12\*\s+£0\.85\*/ })).toBeDefined()
   expect(calls).toEqual([URL])
 
   await setShowGbp($, false)
@@ -217,7 +219,7 @@ test('/gbp switches £ on and off, saves it as the setting, and says what it did
 
   const turnedOn = await $.command.run(GBP_COMMAND)
   expect(turnedOn.text).toBe('£ on, at 0.7549 per $ (ECB, 13 Oct). /gbp turns it off.')
-  expect(await ui.find({ type: 'Text', text: /\$1\.12\*\s+£0\.85/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\$1\.12\*\s+£0\.85\*/ })).toBeDefined()
   expect(calls).toEqual([URL])
 
   const turnedOff = await $.command.run(GBP_COMMAND)

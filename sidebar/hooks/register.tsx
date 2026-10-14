@@ -592,8 +592,14 @@ export const register: Register = (on, options) => {
     const isGbp = gbpChanged ?? gbpOption
     // The rate to show £ at; undefined when GBP rate (£) is off or none is fetched.
     const rate = isGbp ? fx?.rate : undefined
-    const Gbp = ({ usd }: { usd: number }) =>
-      rate === undefined ? null : <Text color="yellow"> {fmtGbp(usd, rate)}</Text>
+    // £ after a $ figure, starred like it when the discount is off it.
+    const Gbp = ({ usd, isDiscounted = false }: { usd: number; isDiscounted?: boolean }) =>
+      rate === undefined ? null : (
+        <Text>
+          <Text color="yellow"> {fmtGbp(usd, rate)}</Text>
+          {isDiscounted && <Text dimColor>*</Text>}
+        </Text>
+      )
     const listCost = u?.costUsd ?? 0
     const home = ws?.home
     const effort = fed?.effort ?? step?.effort
@@ -731,7 +737,7 @@ export const register: Register = (on, options) => {
           <Text dimColor>cost  </Text>
           <Text color="yellow">${discounted(listCost, discount).toFixed(2)}</Text>
           {discount > 0 && <Text dimColor>*</Text>}
-          <Gbp usd={discounted(listCost, discount)} />
+          <Gbp usd={discounted(listCost, discount)} isDiscounted={discount > 0} />
         </Text>
         <Text>
           <Text dimColor>time  </Text>

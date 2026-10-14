@@ -42,9 +42,9 @@ test('shows the rate date as day and month', async () => {
 })
 
 test('the cache chip carries £ when it fits the room left on the line, and drops only the £ when not', async () => {
-  // "$0.37* £0.28 (45.9k)" is 20 columns
-  expect(cacheAmount({ cost: 0.37, isDiscounted: true, toks: '45.9k', rate: 0.75, room: 20 })).toBe('$0.37* £0.28 (45.9k)')
-  expect(cacheAmount({ cost: 0.37, isDiscounted: true, toks: '45.9k', rate: 0.75, room: 19 })).toBe('$0.37* (45.9k)')
+  // "$0.37* £0.28* (45.9k)" is 21 columns
+  expect(cacheAmount({ cost: 0.37, isDiscounted: true, toks: '45.9k', rate: 0.75, room: 21 })).toBe('$0.37* £0.28* (45.9k)')
+  expect(cacheAmount({ cost: 0.37, isDiscounted: true, toks: '45.9k', rate: 0.75, room: 20 })).toBe('$0.37* (45.9k)')
   expect(cacheAmount({ cost: 0.37, isDiscounted: false, toks: '45.9k', rate: undefined, room: 99 })).toBe('$0.37 (45.9k)')
   // no pricing file: tokens only, never £
   expect(cacheAmount({ cost: undefined, isDiscounted: true, toks: '45.9k', rate: 0.75, room: 99 })).toBe('45.9k')
