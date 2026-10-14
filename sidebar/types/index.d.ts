@@ -102,7 +102,7 @@ declare module 'claude-code' {
       discountChange: number | null
       // The USD to GBP rate in use; null until one is fetched or read back.
       gbpRate: GbpRate | null
-      // The Show £ setting, once changed in /config this session.
+      // The GBP rate (£) setting, once changed in /config this session.
       gbpChange: boolean | null
       now: number
     }

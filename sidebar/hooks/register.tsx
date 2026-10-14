@@ -65,6 +65,7 @@ const CI_TICK_MS = 15_000
 // can't be bound: the keybinding matcher has no names for them.
 const CMD_CI_REFRESH = 'ci-refresh'
 const CMD_OPEN_PR = 'open-pr'
+const CMD_GBP = 'gbp'
 
 // Per-model prices, optional (format in README.md). Missing or unreadable
 // means the cache chip shows the rebuild size in tokens and no dollar cost.
@@ -366,7 +367,7 @@ export const register: Register = (on, options) => {
   const discountOption = toDiscount(options.discountPercent)
   const gbpOption = options.showGbp === true
 
-  // The discount and Show £ rows in /config: show a change at once, whether
+  // The discount and GBP rate (£) rows in /config: show a change at once, whether
   // or not the engine reloads the module with the new options.
   on('config.set', async ($, e, next) => {
     const set = await next(e)
@@ -384,10 +385,11 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     // The £ rate first, off the start-up path, so nothing below holds it up
-    // or stops it. Nothing is fetched while Show £ is off.
+    // or stops it. Nothing is fetched while GBP rate (£) is off.
     if (gbpOption) $.clock.after(0, () => void refreshGbpRate($))
 
     await $.command.register({ name: 'sidebar', description: 'Show or hide the session sidebar pane' })
+    await $.command.register({ name: CMD_GBP, description: 'Show or hide £ beside $ costs in the sidebar' })
 
     const u = await $.session.usage()
     const startedAt = await sessionStartedAt($, u.startedAt)
@@ -428,6 +430,26 @@ export const register: Register = (on, options) => {
     const opened = await $.ui.open({ id: PANE, title: 'Session', columns: PANE_COLUMNS })
 
     return { text: opened.isPlaced ? 'Sidebar opened.' : `Sidebar not placed: ${opened.reason}` }
+  })
+
+  // /gbp flips the GBP rate (£) setting, saved as if changed in /config. This
+  // plugin's own config.set hook doesn't see its own change, so the pane is
+  // told here.
+  on('command.run', { command: CMD_GBP }, async $ => {
+    const isOn = !((await read($, gbpChange)) ?? gbpOption)
+    const row = (await $.config.list()).find(r => r.provider.plugin === 'sidebar' && r.key.endsWith('.showGbp'))
+    const set = await $.config.set({ key: row?.key ?? 'sidebar.showGbp', value: isOn })
+    if (set.deny !== undefined) return { text: `£ not changed: ${set.deny}` }
+    await update($, gbpChange, () => isOn)
+    if (!isOn) return { text: `£ off. /${CMD_GBP} turns it on.` }
+    await refreshGbpRate($)
+    const fx = await read($, gbpRate)
+
+    return {
+      text: fx === null
+        ? `£ on; rate not fetched yet. /${CMD_GBP} turns it off.`
+        : `£ on, at ${fx.rate.toFixed(4)} per $ (ECB, ${fmtRateDate(fx.date)}). /${CMD_GBP} turns it off.`,
+    }
   })
 
   // ctrl+x r / ctrl+x o (and the pane's buttons). Answering with no text means a key
@@ -568,7 +590,7 @@ export const register: Register = (on, options) => {
     ])
     const discount = changed ?? discountOption
     const isGbp = gbpChanged ?? gbpOption
-    // The rate to show £ at; undefined when Show £ is off or none is fetched.
+    // The rate to show £ at; undefined when GBP rate (£) is off or none is fetched.
     const rate = isGbp ? fx?.rate : undefined
     const Gbp = ({ usd }: { usd: number }) =>
       rate === undefined ? null : <Text color="yellow"> {fmtGbp(usd, rate)}</Text>

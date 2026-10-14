@@ -25,7 +25,15 @@ const measure: SessionMeasureInput = {
 const DAY = 24 * 60 * 60 * 1000
 const URL = 'https://api.frankfurter.dev/v1/latest?from=USD&to=GBP'
 const RATE = '{"amount":1.0,"base":"USD","date":"2026-10-13","rates":{"GBP":0.75492}}'
+const GBP_KEY = 'sidebar@pt-mods.showGbp'
 const START = { cwd: '/repo', surface: 'terminal', isInteractive: true, startedAt: 0 } as const
+// /gbp typed at the prompt of a fullscreen session.
+const GBP_COMMAND = {
+  command: 'gbp',
+  args: '',
+  origin: { kind: 'composer' },
+  presentation: { isFullscreen: true, columns: 160 },
+} as const
 // A rate saved by an earlier session, a different figure from RATE's.
 const SAVED = { rate: 0.8, date: '2026-10-01', fetchedAt: 0 }
 
@@ -33,15 +41,32 @@ const SAVED = { rate: 0.8, date: '2026-10-01', fetchedAt: 0 }
 // Nothing sits beneath the plugin in a test: answer the events these need.
 // The sidebar's main start-up hook is skipped (no commands, no git here);
 // the rate has a start-up hook of its own.
-const answerEngine = (on: On, opts: { now?: number; store?: Record<string, unknown> } = {}) => {
+const answerEngine = (on: On, opts: { now?: number; store?: Record<string, unknown>; saved?: unknown[] } = {}) => {
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
-  on('config.set', (_$, e) => ({ value: e.value }))
+  on('config.set', (_$, e) => {
+    opts.saved?.push([e.key, e.value])
+    return { value: e.value }
+  })
+  // The GBP rate (£) row as /config lists it, keyed the way an installed
+  // plugin's row might be, so /gbp is seen to use the listed key.
+  on('config.list', () => ({
+    value: [
+      {
+        key: GBP_KEY,
+        label: 'GBP rate (£)',
+        kind: 'boolean',
+        value: false,
+        provider: { plugin: 'sidebar', tier: 'user' },
+        isLocked: false,
+      },
+    ],
+  }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   mock.store(on, opts.store)
   return mock.clock(on, { now: opts.now ?? 0 })
 }
 
-// The Show £ row changed in /config. A session's engine stamps who owns the
+// The GBP rate (£) row changed in /config. A session's engine stamps who owns the
 // row and where the change came from; a test's $.config.set takes only key
 // and value, so the stamp is given here.
 const setShowGbp = ($: Engine, value: boolean) =>
@@ -178,5 +203,30 @@ test('switching it on in /config fetches the rate and shows £ at once', async (
 
   await setShowGbp($, false)
   expect(await ui.find({ type: 'Text', text: /£/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('/gbp switches £ on and off, saves it as the setting, and says what it did', async ($, on) => {
+  const calls = stubRate(on, 'ok')
+  const saved: unknown[] = []
+  const clock = answerEngine(on, { saved })
+  await $.session.start(START)
+  await clock.settle()
+  await $.session.measure(measure)
+  const ui = await $.ui.mount({ plugin: 'sidebar', surface: 'terminal', ...PANE })
+
+  const turnedOn = await $.command.run(GBP_COMMAND)
+  expect(turnedOn.text).toBe('£ on, at 0.7549 per $ (ECB, 13 Oct). /gbp turns it off.')
+  expect(await ui.find({ type: 'Text', text: /\$1\.12\*\s+£0\.85/ })).toBeDefined()
+  expect(calls).toEqual([URL])
+
+  const turnedOff = await $.command.run(GBP_COMMAND)
+  expect(turnedOff.text).toBe('£ off. /gbp turns it on.')
+  expect(await ui.find({ type: 'Text', text: /£/ })).toBeUndefined()
+
+  expect(saved).toEqual([
+    [GBP_KEY, true],
+    [GBP_KEY, false],
+  ])
   await ui.unmount()
 })

@@ -12,8 +12,8 @@
     },
     "showGbp": {
       "type": "boolean",
-      "title": "Show £ alongside $",
-      "description": "Also show costs in pounds, at the European Central Bank's daily rate, fetched at most once a day from frankfurter.dev. Anthropic bills in dollars, so the £ figure is a guide.",
+      "title": "GBP rate (£)",
+      "description": "On: costs also show in £, after the $ figure, at the European Central Bank's daily rate (fetched at most once a day from frankfurter.dev). Anthropic bills in dollars, so £ is a guide. /gbp switches it too.",
       "default": false
     }
   }
