@@ -1,9 +1,15 @@
 import type { GbpRate } from '../types'
 
 // The European Central Bank's daily reference rate, via Frankfurter: free,
-// no key. One working-day figure, so fetching more than daily gains nothing.
+// no key. It's published once a working day, about 3pm UK time, so a rate
+// is fetched again once it's 6 hours old: at most 4 small requests a day.
+// Each session checks hourly, which reads the saved rate and fetches only
+// when it's due, and a failed try waits an hour, across all sessions.
 export const FX_URL = 'https://api.frankfurter.dev/v1/latest?from=USD&to=GBP'
-export const FX_MAX_AGE_MS = 24 * 60 * 60 * 1000
+const HOUR_MS = 60 * 60 * 1000
+export const FX_MAX_AGE_MS = 6 * HOUR_MS
+export const FX_CHECK_MS = HOUR_MS
+export const FX_RETRY_MS = HOUR_MS
 
 const isRate = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0
 
@@ -36,16 +42,34 @@ export const isRateStale = (saved: unknown, at: number) => {
   return age < 0 || age >= FX_MAX_AGE_MS
 }
 
+// Whether a fetch was tried (by this or another session) too recently to try
+// again. A try "in the future" means the clock moved back: try again.
+export const isRecentTry = (triedAt: unknown, at: number) => {
+  if (typeof triedAt !== 'number') return false
+  const age = at - triedAt
+  return age >= 0 && age < FX_RETRY_MS
+}
+
 export const fmtGbp = (usd: number, rate: number) => `£${(usd * rate).toFixed(2)}`
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-// "2026-10-13" -> "13 Oct"; anything else as given.
+// 1st, 2nd, 3rd, 4th ... 11th, 12th, 13th ... 21st, 22nd, 23rd ... 31st.
+const ordinal = (day: number) => {
+  const isTeen = day >= 11 && day <= 13
+  const suffix = isTeen ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[day % 10] ?? 'th'
+  return `${day}${suffix}`
+}
+
+// "2026-10-13" -> "13th Oct"; anything else as given.
 export const fmtRateDate = (date: string) => {
   const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(date)
   const month = m ? MONTHS[Number(m[1]) - 1] : undefined
-  return m && month ? `${Number(m[2])} ${month}` : date
+  return m && month ? `${ordinal(Number(m[2]))} ${month}` : date
 }
+
+// The rate as the Cost section and /gbp give it: "£ rate: 0.7538 (ECB, 14th Oct)".
+export const fmtRateLine = (fx: GbpRate) => `£ rate: ${fx.rate.toFixed(4)} (ECB, ${fmtRateDate(fx.date)})`
 
 // The cache chip's figure: the rebuild cost ($, with £ when there's a rate
 // and room for it on the line) and its size in tokens; tokens alone when

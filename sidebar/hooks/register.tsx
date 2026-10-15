@@ -13,7 +13,7 @@ import {
   summarize,
 } from './ci'
 import { FEED_DIR, parseFeed, resolveCache } from './feed'
-import { FX_URL, cacheAmount, fmtGbp, fmtRateDate, isRateStale, parseRate, toRate } from './fx'
+import { FX_CHECK_MS, FX_URL, cacheAmount, fmtGbp, fmtRateLine, isRateStale, isRecentTry, parseRate, toRate } from './fx'
 import { baseName, homeDir } from './paths'
 import { costColor, discounted, parsePricing, recacheCost, toDiscount } from './pricing'
 import { elapsedText, isKnownStart } from './session'
@@ -81,16 +81,19 @@ const refreshPricing = async ($: EngineInterface, home: string | undefined) => {
   }
 }
 
-// The USD to GBP rate, kept in $.store so every session shares one fetch a
-// day. A failed fetch keeps the saved rate; with none saved, no £ is shown.
+// The USD to GBP rate, kept in $.store so every session shares each fetch,
+// with when one was last tried, so a failing fetch isn't retried by every
+// session. A failed fetch keeps the saved rate; with none saved, no £ is shown.
 const GBP_STORE_KEY = 'gbpRate'
+const GBP_TRIED_KEY = 'gbpRateTriedAt'
 
 const refreshGbpRate = async ($: EngineInterface) => {
   const saved = toRate(await $.store.get(GBP_STORE_KEY))
   if (saved !== undefined) await update($, gbpRate, () => saved)
   const at = await $.clock.now()
-  if (!isRateStale(saved, at)) return
+  if (!isRateStale(saved, at) || isRecentTry(await $.store.get(GBP_TRIED_KEY), at)) return
   try {
+    await $.store.set(GBP_TRIED_KEY, at)
     const res = await $.http.fetch(FX_URL)
     const fresh = res.ok ? parseRate(res.text, at) : undefined
     if (fresh === undefined) return
@@ -385,8 +388,13 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     // The £ rate first, off the start-up path, so nothing below holds it up
-    // or stops it. Nothing is fetched while GBP rate (£) is off.
-    if (gbpOption) $.clock.after(0, () => void refreshGbpRate($))
+    // or stops it; then hourly, so a session left open picks up the day's
+    // new rate. Nothing is fetched while GBP rate (£) is off.
+    const refreshGbpIfOn = async () => {
+      if ((await read($, gbpChange)) ?? gbpOption) await refreshGbpRate($)
+    }
+    $.clock.after(0, () => void refreshGbpIfOn())
+    $.clock.every(FX_CHECK_MS, () => void refreshGbpIfOn())
 
     await $.command.register({ name: 'sidebar', description: 'Show or hide the session sidebar pane' })
     await $.command.register({ name: CMD_GBP, description: 'Show or hide £ beside $ costs in the sidebar' })
@@ -447,8 +455,8 @@ export const register: Register = (on, options) => {
 
     return {
       text: fx === null
-        ? `£ on; rate not fetched yet. /${CMD_GBP} turns it off.`
-        : `£ on, at ${fx.rate.toFixed(4)} per $ (ECB, ${fmtRateDate(fx.date)}). /${CMD_GBP} turns it off.`,
+        ? `£ on. £ rate not fetched yet. /${CMD_GBP} turns it off.`
+        : `£ on. ${fmtRateLine(fx)}. /${CMD_GBP} turns it off.`,
     }
   })
 
@@ -828,7 +836,7 @@ export const register: Register = (on, options) => {
             )}
             {isGbp && (
               <Text dimColor wrap="wrap">
-                {fx === null ? '£ rate not fetched yet' : `£ at ${fx.rate.toFixed(4)} per $ (ECB, ${fmtRateDate(fx.date)})`}
+                {fx === null ? '£ rate not fetched yet' : fmtRateLine(fx)}
               </Text>
             )}
           </Box>
