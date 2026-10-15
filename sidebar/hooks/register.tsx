@@ -445,9 +445,15 @@ export const register: Register = (on, options) => {
   // told here.
   on('command.run', { command: CMD_GBP }, async $ => {
     const isOn = !((await read($, gbpChange)) ?? gbpOption)
-    const row = (await $.config.list()).find(r => r.provider.plugin === 'sidebar' && r.key.endsWith('.showGbp'))
-    const set = await $.config.set({ key: row?.key ?? 'sidebar.showGbp', value: isOn })
-    if (set.deny !== undefined) return { text: `£ not changed: ${set.deny}` }
+    // Where there's no /config to save to (claude -p), saving throws: say so.
+    let deny: string | undefined
+    try {
+      const row = (await $.config.list()).find(r => r.provider.plugin === 'sidebar' && r.key.endsWith('.showGbp'))
+      deny = (await $.config.set({ key: row?.key ?? 'sidebar.showGbp', value: isOn })).deny
+    } catch (err) {
+      deny = err instanceof Error ? err.message : String(err)
+    }
+    if (deny !== undefined) return { text: `£ not changed: ${deny}` }
     await update($, gbpChange, () => isOn)
     if (!isOn) return { text: `£ off. /${CMD_GBP} turns it on.` }
     await refreshGbpRate($)

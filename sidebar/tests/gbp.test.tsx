@@ -242,6 +242,29 @@ test('switching it on in /config fetches the rate and shows £ at once', async (
   await ui.unmount()
 })
 
+test('/gbp where the setting cannot be saved (as in claude -p) says so and changes nothing', async ($, on) => {
+  const calls = stubRate(on, 'ok')
+  // claude -p lists no /config rows, and saving one throws
+  on('config.list', () => ({ value: [] }))
+  on('config.set', () => {
+    throw new Error('$.config.set: no /config row with key sidebar.showGbp')
+  })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  mock.store(on)
+  const clock = mock.clock(on, { now: 0 })
+  await $.session.start(START)
+  await clock.settle()
+  await $.session.measure(measure)
+
+  const reply = await $.command.run(GBP_COMMAND)
+  expect(reply.text).toMatch(/^£ not changed: /)
+  const ui = await $.ui.mount({ plugin: 'sidebar', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /£/ })).toBeUndefined()
+  expect(calls).toEqual([])
+  await ui.unmount()
+})
+
 test('/gbp switches £ on and off, saves it as the setting, and says what it did', async ($, on) => {
   const calls = stubRate(on, 'ok')
   const saved: unknown[] = []
