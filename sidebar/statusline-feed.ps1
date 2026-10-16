@@ -9,8 +9,12 @@
 #
 # -Then <path> passes the same input on to another status line program (a
 # .cmd, .bat or .exe, run by cmd.exe) and prints what that prints, so the slot
-# can be shared, e.g. with a status line another tool installed. Without
-# -Then it prints nothing, so no status line is drawn under the prompt.
+# can be shared. Without -Then it prints nothing, so no status line is drawn
+# under the prompt.
+#
+# In an Orca terminal (ORCA_PANE_KEY is set), the input also goes to Orca's
+# own status line script when it's installed, as Orca's status line would do.
+# It can't be named with -Then: Orca replaces a status line that names it.
 #
 # Claude Code cancels a run that's still going when the next update is due,
 # so this saves first and passes on after: PowerShell is slow to start, and a
@@ -26,12 +30,13 @@ $buffer = New-Object System.IO.MemoryStream
 $stdin.CopyTo($buffer)
 $bytes = $buffer.ToArray()
 
+$home_ = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
+
 $feedDir = $null
 try {
   $sid = ([System.Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json).session_id
   if ($sid -is [string] -and $sid -ne '' -and -not $sid.StartsWith('.') -and
       $sid.IndexOfAny([System.IO.Path]::GetInvalidFileNameChars()) -lt 0) {
-    $home_ = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
     $feedDir = Join-Path $home_ '.claude\state\statusline'
     [System.IO.Directory]::CreateDirectory($feedDir) | Out-Null
     $file = Join-Path $feedDir "$sid.json"
@@ -51,23 +56,50 @@ try {
   }
 } catch {}
 
-if ($Then) {
-  try {
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = "$env:SystemRoot\System32\cmd.exe"
-    # /s strips the outer quotes, leaving the path quoted, spaces and all.
-    $psi.Arguments = "/d /s /c `"`"$Then`"`""
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardInput = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.CreateNoWindow = $true
-    $next = [System.Diagnostics.Process]::Start($psi)
-    $out = $next.StandardOutput.BaseStream.CopyToAsync([Console]::OpenStandardOutput())
-    $next.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
-    $next.StandardInput.Close()
-    $out.Wait()
-    $next.WaitForExit()
-  } catch {}
+$orcaScript = Join-Path $home_ '.orca\agent-hooks\claude-statusline.cmd'
+$toOrca = $false
+if ($env:ORCA_PANE_KEY -and [System.IO.File]::Exists($orcaScript)) {
+  $toOrca = $true
+  # -Then naming Orca's script already runs it.
+  if ($Then) {
+    try {
+      $toOrca = [System.IO.Path]::GetFullPath($Then) -ne [System.IO.Path]::GetFullPath($orcaScript)
+    } catch {}
+  }
+}
+
+# Runs a program through cmd.exe with the input on its stdin, and prints what
+# it prints unless $quiet. The input goes in from a file: .NET's stdin writer
+# puts a byte order mark first under the UTF-8 code page, which would make
+# the JSON unreadable.
+$inFile = $null
+function Invoke-Next([string]$path, [bool]$quiet) {
+  if (-not $script:inFile) {
+    $script:inFile = Join-Path ([System.IO.Path]::GetTempPath()) "claude-sidebar-feed-$PID.json"
+    [System.IO.File]::WriteAllBytes($script:inFile, $bytes)
+  }
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = "$env:SystemRoot\System32\cmd.exe"
+  # /s strips the outer quotes, leaving the paths quoted, spaces and all.
+  $psi.Arguments = "/d /s /c `"`"$path`" < `"$script:inFile`"`""
+  $psi.UseShellExecute = $false
+  $psi.RedirectStandardOutput = $true
+  $psi.CreateNoWindow = $true
+  $next = [System.Diagnostics.Process]::Start($psi)
+  if ($quiet) {
+    $next.StandardOutput.ReadToEnd() | Out-Null
+  } else {
+    $next.StandardOutput.BaseStream.CopyTo([Console]::OpenStandardOutput())
+  }
+  $next.WaitForExit()
+}
+
+# What's shown is the -Then program's output when there is one, else Orca's.
+try {
+  if ($Then) { try { Invoke-Next $Then $false } catch {} }
+  if ($toOrca) { try { Invoke-Next $orcaScript ([bool]$Then) } catch {} }
+} finally {
+  if ($inFile) { try { [System.IO.File]::Delete($inFile) } catch {} }
 }
 
 # Ended sessions leave their file behind; drop week-old ones now and then.
