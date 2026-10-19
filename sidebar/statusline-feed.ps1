@@ -68,39 +68,40 @@ if ($env:ORCA_PANE_KEY -and [System.IO.File]::Exists($orcaScript)) {
   }
 }
 
+# .NET's stdin writer for a program it starts puts the console encoding's
+# byte order mark first, which under the UTF-8 code page makes the JSON
+# unreadable. UTF-8 without one keeps the code page as it is.
+if ($Then -or $toOrca) {
+  try {
+    if ([Console]::InputEncoding.CodePage -eq 65001 -and [Console]::InputEncoding.GetPreamble().Length -gt 0) {
+      [Console]::InputEncoding = New-Object System.Text.UTF8Encoding $false
+    }
+  } catch {}
+}
+
 # Runs a program through cmd.exe with the input on its stdin, and prints what
-# it prints unless $quiet. The input goes in from a file: .NET's stdin writer
-# puts a byte order mark first under the UTF-8 code page, which would make
-# the JSON unreadable.
-$inFile = $null
+# it prints unless $quiet.
 function Invoke-Next([string]$path, [bool]$quiet) {
-  if (-not $script:inFile) {
-    $script:inFile = Join-Path ([System.IO.Path]::GetTempPath()) "claude-sidebar-feed-$PID.json"
-    [System.IO.File]::WriteAllBytes($script:inFile, $bytes)
-  }
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = "$env:SystemRoot\System32\cmd.exe"
-  # /s strips the outer quotes, leaving the paths quoted, spaces and all.
-  $psi.Arguments = "/d /s /c `"`"$path`" < `"$script:inFile`"`""
+  # /s strips the outer quotes, leaving the path quoted, spaces and all.
+  $psi.Arguments = "/d /s /c `"`"$path`"`""
   $psi.UseShellExecute = $false
+  $psi.RedirectStandardInput = $true
   $psi.RedirectStandardOutput = $true
   $psi.CreateNoWindow = $true
   $next = [System.Diagnostics.Process]::Start($psi)
-  if ($quiet) {
-    $next.StandardOutput.ReadToEnd() | Out-Null
-  } else {
-    $next.StandardOutput.BaseStream.CopyTo([Console]::OpenStandardOutput())
-  }
+  $to = if ($quiet) { [System.IO.Stream]::Null } else { [Console]::OpenStandardOutput() }
+  $out = $next.StandardOutput.BaseStream.CopyToAsync($to)
+  $next.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+  $next.StandardInput.Close()
+  $out.Wait()
   $next.WaitForExit()
 }
 
 # What's shown is the -Then program's output when there is one, else Orca's.
-try {
-  if ($Then) { try { Invoke-Next $Then $false } catch {} }
-  if ($toOrca) { try { Invoke-Next $orcaScript ([bool]$Then) } catch {} }
-} finally {
-  if ($inFile) { try { [System.IO.File]::Delete($inFile) } catch {} }
-}
+if ($Then) { try { Invoke-Next $Then $false } catch {} }
+if ($toOrca) { try { Invoke-Next $orcaScript ([bool]$Then) } catch {} }
 
 # Ended sessions leave their file behind; drop week-old ones now and then.
 if ($feedDir -and (Get-Random -Maximum 50) -eq 0) {

@@ -18,9 +18,17 @@ $input_ = '{"session_id":"test-session","rate_limits":{"five_hour":{"used_percen
 function Fail($message) { Write-Host "  FAIL: $message"; $script:failures++ }
 
 # A .cmd that appends its stdin to <log>, then a "--" line, prints <prints>
-# and exits with <code>.
-function New-StandIn($path, $log, $prints, $code = 0) {
-  $body = "@echo off`r`n`"%SystemRoot%\System32\more.com`" >> `"$log`"`r`n>> `"$log`" echo --`r`necho $prints`r`nexit /b $code`r`n"
+# and exits with <code>. <first> is a line it runs before reading its stdin.
+function New-StandIn($path, $log, $prints, $code = 0, $first = 'rem') {
+  $body = "@echo off`r`n$first`r`n`"%SystemRoot%\System32\more.com`" >> `"$log`"`r`n>> `"$log`" echo --`r`necho $prints`r`nexit /b $code`r`n"
+  [System.IO.File]::WriteAllText($path, $body)
+}
+
+# The same, reading its stdin with .NET as most status line programs do,
+# where more.com would hide what chcp does to a stdin that's a file.
+function New-DotNetStandIn($path, $log, $prints, $first) {
+  $copy = "`$i = [Console]::OpenStandardInput(); `$o = [IO.File]::Open('$log', 'Append'); `$i.CopyTo(`$o); `$o.Close()"
+  $body = "@echo off`r`n$first`r`npowershell -NoProfile -Command `"$copy`"`r`n>> `"$log`" echo.`r`n>> `"$log`" echo --`r`necho $prints`r`n"
   [System.IO.File]::WriteAllText($path, $body)
 }
 
@@ -129,6 +137,14 @@ try {
   Start-Case "-Then naming Orca's script with forward slashes and other casing: still once"
   Invoke-Feed $input_ 'tab1:1' ($orca.Replace('\', '/').ToUpper())
   Assert-Case '-Then is Orca, odd path' 'ORCA-OUT' 1 0 -saved
+
+  # Status line .cmd files often start with chcp 65001, for emoji. After
+  # chcp, a program reading a stdin that's a file finds nothing left, so
+  # the input has to come in on a pipe, as Claude Code gives it.
+  Start-Case 'a -Then program that runs chcp first still gets the input'
+  New-DotNetStandIn $other "$T\then.log" 'THEN-OUT' 'chcp 65001 >nul'
+  Invoke-Feed $input_ $null $other
+  Assert-Case '-Then runs chcp' 'THEN-OUT' 0 1 -saved
 
   Start-Case 'a -Then program that fails: the feed still exits 0'
   New-StandIn $other "$T\then.log" 'THEN-OUT' 3
