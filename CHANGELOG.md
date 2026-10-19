@@ -4,6 +4,13 @@ Notable changes to the plugins in this marketplace, newest first. Each plugin ha
 
 ## sidebar
 
+### 0.6.0 (2026-10-19)
+
+- In an Orca terminal, the status line feeds hand their input on to Orca's status line script, so Orca's usage display keeps working without naming Orca's script, which Orca would replace. (#5, kizzsandhu)
+- `statusline-feed.sh` takes `-Then` too, as the PowerShell feed does. (#5, kizzsandhu)
+- Windows: `-Then` no longer gets a byte order mark under the UTF-8 code page. (#5, kizzsandhu)
+- Tests for both feeds, run by GitHub on Linux, macOS and Windows whenever a feed changes. (#5, kizzsandhu)
+
 ### 0.5.0 (2026-10-15)
 
 - Optional £ beside $ costs: the session cost, the list price and the cache chip. Off by default; turn it on with **GBP rate (£)** in `/config`, or switch it with `/gbp`. The Cost section shows the rate in use. (#4, kizzsandhu)
