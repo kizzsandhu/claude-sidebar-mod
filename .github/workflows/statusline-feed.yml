@@ -1,0 +1,42 @@
+# Runs the status line feed's tests on each OS it's for, on every push and PR
+# that touches the feeds or their tests. The macOS job uses the Mac's own
+# /bin/bash (3.2), the oldest bash the feed has to work with.
+
+name: statusline feed
+
+on:
+  push:
+    paths:
+      - 'sidebar/statusline-feed.*'
+      - 'sidebar/tests/statusline-feed.test.*'
+      - '.github/workflows/statusline-feed.yml'
+  pull_request:
+    paths:
+      - 'sidebar/statusline-feed.*'
+      - 'sidebar/tests/statusline-feed.test.*'
+      - '.github/workflows/statusline-feed.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bash:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: /bin/bash --version | head -1 && jq --version
+      - run: /bin/bash sidebar/tests/statusline-feed.test.sh
+
+  powershell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Windows PowerShell 5.1, the one Windows has built in and the README's
+      # status line runs.
+      - shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File sidebar\tests\statusline-feed.test.ps1
